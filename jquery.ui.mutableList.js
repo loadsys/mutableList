@@ -1,9 +1,4 @@
 (function($) {
-/**
- * This plugin is the consolidation of all the plugins above into a
- * single reusable plugin. Functionality for edit and delete will 
- * also be added here.
- */
 $.widget('ui.mutableList', {
 	'options': {
 		'name': false,
@@ -31,6 +26,13 @@ $.widget('ui.mutableList', {
 				'name': false,
 				'url': false
 			}
+		},
+		'callbacks': {
+			'add': false,
+			'edit': false,
+			'delete': false,
+			'list': false,
+			'refresh': false
 		}
 	},
 	'_list': [],
@@ -59,7 +61,7 @@ $.widget('ui.mutableList', {
 			}
 		}
 		if (self.options.preload) {
-			self._loadTemplate();
+			self.loadTemplate();
 		}
 		$(self.options.add, self.element).bind('click', function() {
 			self.add($(this));
@@ -67,23 +69,27 @@ $.widget('ui.mutableList', {
 		});
 		self.list(true);
 	},
-	'list': function(refresh) {
+	'list': function(refresh, options) {
 		var self = this;
 		function _load() {
-			self._loadTemplate('list', function() {
-				$(self.options.target, self.element).empty();
-				$.tmpl(self.options.tmpl.list.name, self._list).appendTo($(self.options.target, self.element));
-				if (self.options.edit) {
-					$(self.options.edit, self.element).bind('click', function() {
-						self.edit($(this));
-						return false;
-					});
-				}
-				if (self.options.delete) {
-					$(self.options.delete, self.element).bind('click', function() {
-						self.delete($(this));
-						return false;
-					});
+			self.loadTemplate('list', function() {
+				if (typeof self.options.callbacks.list == 'function') {
+					self.options.callbacks.list.apply(self, [self.template('list'), self._list, options]);
+				} else {
+					$(self.options.target, self.element).empty();
+					$.tmpl(self.options.tmpl.list.name, self._list).appendTo($(self.options.target, self.element));
+					if (self.options.edit) {
+						$(self.options.edit, self.element).bind('click', function() {
+							self.edit($(this));
+							return false;
+						});
+					}
+					if (self.options.delete) {
+						$(self.options.delete, self.element).bind('click', function() {
+							self.delete($(this));
+							return false;
+						});
+					}
 				}
 			});
 		}
@@ -95,28 +101,39 @@ $.widget('ui.mutableList', {
 	},
 	'add': function(link) {
 		var self = this;
-		self._loadTemplate('add', function() {
-			self._loadDialog('add', {url: self._checkExtension(link.attr('href'), 'json')}, 'Add');
+		self.loadTemplate('add', function() {
+			if (typeof self.options.callbacks.add == 'function') {
+				self.options.callbacks.add.apply(self, [self.template('add'), link]);
+			} else {
+				self.loadDialog('add', {url: self.checkExtension(link.attr('href'), 'json')}, 'Add');
+			}
 		});
 	},
 	'edit': function(link) {
 		var self = this;
-		self._loadTemplate('edit', function() {
-			$.ajax({
-				url: self._checkExtension(link.attr('href'), 'json'),
-				type: 'post',
-				dataType: 'json',
-				success: function(data) {
-					console.log(data);
-					self._loadDialog('edit', $.extend(data, {url: self._checkExtension(link.attr('href'), 'json')}), 'Submit');
-				}
-			});
+		self.loadTemplate('edit', function() {
+			if (typeof self.options.callbacks.edit == 'function') {
+				self.options.callbacks.edit.apply(self, [self.template('edit'), link]);
+			} else {
+				$.ajax({
+					url: self.checkExtension(link.attr('href'), 'json'),
+					type: 'post',
+					dataType: 'json',
+					success: function(data) {
+						self.loadDialog('edit', $.extend(data, {url: self.checkExtension(link.attr('href'), 'json')}), 'Submit');
+					}
+				});
+			}
 		});
 	},
 	'delete': function(link) {
 		var self = this;
-		self._loadTemplate('delete', function() {
-			self._loadDialog('delete', {url: self._checkExtension(link.attr('href'), 'json')}, 'Delete');
+		self.loadTemplate('delete', function() {
+			if (typeof self.options.callbacks.delete == 'function') {
+				self.options.callbacks.delete.apply(self, [self.template('delete'), link]);
+			} else {
+				self.loadDialog('delete', {url: self.checkExtension(link.attr('href'), 'json')}, 'Delete');
+			}
 		});
 	},
 	'refresh': function(callback) {
@@ -124,19 +141,26 @@ $.widget('ui.mutableList', {
 		if (!self.options.refreshUrl) {
 			$.error('Must define a refresh url in the options object');
 		}
-		$.ajax({
-			url: self._checkExtension(self.options.refreshUrl, 'json'),
-			type: 'get',
-			dataType: 'json',
-			success: function(data) {
-				self._trigger(self.options.name + 'DataRefresh');
-				self._list = data;
-				if (typeof callback == 'function') {
-					callback();
+		if (typeof self.options.callbacks.refresh == 'function') {
+			self.options.callbacks.refresh.apply(self, []);
+		} else {
+			$.ajax({
+				url: self.checkExtension(self.options.refreshUrl, 'json'),
+				type: 'get',
+				dataType: 'json',
+				success: function(data) {
+					self._trigger(self.options.name + 'DataRefresh');
+					self._list = data;
+					if (typeof callback == 'function') {
+						callback();
+					}
+					return;
 				}
-				return;
-			}
-		});		
+			});
+		}
+	},
+	'data': function() {
+		return this._list;
 	},
 	'template': function(type) {
 		var self = this;
@@ -146,7 +170,7 @@ $.widget('ui.mutableList', {
 		}
 		return ret;
 	},
-	'_loadTemplate': function(type, method) {
+	'loadTemplate': function(type, method) {
 		var self = this;
 		var items = self.options.tmpl;
 		var count = 0;
@@ -166,11 +190,11 @@ $.widget('ui.mutableList', {
 			var name = items[key].name || false;
 			var url = items[key].url || false;
 			if (name && url)
-				$.loadTemplate(name, self._checkExtension(url, 'tmpl'), method);
+				$.loadTemplate(name, self.checkExtension(url, 'tmpl'), method);
 		}
 		return true;
 	},
-	'_loadDialog': function(name, data, button) {
+	'loadDialog': function(name, data, button) {
 		var self = this;
 		var dialog = self._dialog;
 		var tmpl = self.template(name);
@@ -183,7 +207,7 @@ $.widget('ui.mutableList', {
 				button = 'Submit';
 			}
 			buttons[button] = function() {
-				self._submitForm(name, $('form', $(this)));
+				self.submitForm(name, $('form', $(this)));
 			}
 			buttons['Cancel'] = function() {
 				dialog.dialog('close');
@@ -203,7 +227,7 @@ $.widget('ui.mutableList', {
 					}
 				});
 			dialog.find('form').submit(function() {
-				self._submitForm(name, $(this));
+				self.submitForm(name, $(this));
 				return false;
 			});
 			dialog.find('form select[data-option-selected]').each(function(index) {
@@ -213,7 +237,7 @@ $.widget('ui.mutableList', {
 			self._dialog = dialog;
 		}
 	},
-	'_submitForm': function(type, form) {
+	'submitForm': function(type, form) {
 		var self = this;
 		form.ajaxSubmit({
 			dataType: 'json',
@@ -221,17 +245,14 @@ $.widget('ui.mutableList', {
 				self._trigger(type + 'FormSuccess', [data]);
 				self._dialog.dialog('close');
 				self._dialog = false;
-				self.list(true);
+				self.list(true, data);
 			},
 			error: function(xhr, status, error) {
-				console.log(xhr);
-				console.log(status);
-				console.log(error);
 				self._trigger(type + 'FormError', [xhr, status, error]);
 			}
 		});
 	},
-	'_checkExtension': function(url, ext) {
+	'checkExtension': function(url, ext) {
 		if (!url || !ext || typeof url != 'string' || typeof ext != 'string') {
 			return false;
 		}
